@@ -1,0 +1,24 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="brandGradient" x1="20" y1="20" x2="140" y2="140" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2FB4D6" />
+      <stop offset="0.55" stop-color="#2A7CD6" />
+      <stop offset="1" stop-color="#0B2B4F" />
+    </linearGradient>
+    <linearGradient id="accentGradient" x1="38" y1="36" x2="120" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E8F8FF" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.85" />
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="140" height="140" rx="36" fill="url(#brandGradient)" />
+  <path
+    d="M48 92C54 70 72 52 96 48C101 47 107 47 112 48"
+    stroke="url(#accentGradient)"
+    stroke-width="10"
+    stroke-linecap="round"
+  />
+  <path d="M64 102L112 70V114L64 102Z" fill="url(#accentGradient)" />
+  <path d="M50 118C64 128 82 132 100 128" stroke="rgba(232,248,255,0.8)" stroke-width="6" stroke-linecap="round" />
+  <circle cx="52" cy="58" r="6" fill="#E8F8FF" fill-opacity="0.85" />
+  <circle cx="110" cy="50" r="4" fill="#E8F8FF" fill-opacity="0.6" />
+</svg>
