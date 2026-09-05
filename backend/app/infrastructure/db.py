@@ -415,20 +415,24 @@ class TaskRepository:
                         "DELETE FROM ea_course_progress_item WHERE order_id=%s AND tenant_id=%s",
                         (payload.get("orderId"), payload.get("tenantId")),
                     )
+                    cursor.execute("SELECT item_id FROM ea_course_progress_item ORDER BY item_id DESC LIMIT 1 FOR UPDATE")
+                    row = cursor.fetchone()
+                    next_item_id = int(row["item_id"] if row else 0) + 1
                     for item in items:
                         if not isinstance(item, dict) or not str(item.get("courseName") or "").strip():
                             continue
                         cursor.execute(
                             "INSERT INTO ea_course_progress_item "
-                            "(order_id, tenant_id, course_name, course_type, required_flag, term, learning_status, "
+                            "(item_id, order_id, tenant_id, course_name, course_type, required_flag, term, learning_status, "
                             "learning_percent, learning_text, work_status, latest_time, create_time, update_time) "
-                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                            (payload.get("orderId"), payload.get("tenantId"), _redact_error(item.get("courseName"), 128),
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            (next_item_id, payload.get("orderId"), payload.get("tenantId"), _redact_error(item.get("courseName"), 128),
                              _redact_error(item.get("courseType"), 32), item.get("requiredFlag", 0),
                              _redact_error(item.get("term"), 64), item.get("learningStatus", 0),
                              item.get("learningPercent"), _redact_error(item.get("learningText"), 64),
                              item.get("workStatus", 0), item.get("latestTime") or now, now, now),
                         )
+                        next_item_id += 1
                         written += 1
                 conn.commit()
             except Exception:
@@ -455,6 +459,9 @@ class TaskRepository:
                         "DELETE FROM ea_exam_progress_item WHERE order_id=%s AND tenant_id=%s",
                         (payload.get("orderId"), payload.get("tenantId")),
                     )
+                    cursor.execute("SELECT item_id FROM ea_exam_progress_item ORDER BY item_id DESC LIMIT 1 FOR UPDATE")
+                    row = cursor.fetchone()
+                    next_item_id = int(row["item_id"] if row else 0) + 1
                     for item in items:
                         if not isinstance(item, dict) or not str(item.get("examName") or "").strip():
                             continue
@@ -462,15 +469,16 @@ class TaskRepository:
                         old = frozen.get(exam_name.strip())
                         cursor.execute(
                             "INSERT INTO ea_exam_progress_item "
-                            "(order_id, tenant_id, exam_name, exam_status, score, exam_time, latest_time, remark, "
+                            "(item_id, order_id, tenant_id, exam_name, exam_status, score, exam_time, latest_time, remark, "
                             "frozen_flag, frozen_reason, frozen_time, create_time, update_time) "
-                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                            (payload.get("orderId"), payload.get("tenantId"), exam_name, item.get("examStatus", 0),
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            (next_item_id, payload.get("orderId"), payload.get("tenantId"), exam_name, item.get("examStatus", 0),
                              item.get("score"), item.get("examTime"), item.get("latestTime") or now,
                              _redact_error(item.get("remark"), 255), 1 if old else 0,
                              old.get("frozen_reason") if old else None, old.get("frozen_time") if old else None,
                              now, now),
                         )
+                        next_item_id += 1
                         written += 1
                 conn.commit()
             except Exception:

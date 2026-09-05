@@ -25,6 +25,11 @@ from app.adapters.tiku import TikuClient
 logger = logging.getLogger(__name__)
 
 
+def account_kind(value: str | None) -> str:
+    """按执行器规则识别手机号账号，返回脱敏的账号类型标签。"""
+    return "phone" if re.fullmatch(r"1\d{10}", str(value or "").strip()) else "username"
+
+
 class _Response(Protocol):
     status_code: int
     headers: Any
@@ -271,6 +276,11 @@ class ChaoxingAdapter:
         if not base_url:
             return AdapterResult(False, "adapter_config_missing", "超星适配器未配置平台地址")
         stage = "prepare"
+        logger.info(
+            "chaoxing login start: student_id=%s account_kind=%s path=school_login_page",
+            context.student_id,
+            account_kind(username),
+        )
         try:
             client = self._client_factory(base_url, int(self.config.get("timeout", 15)))
             captcha_id = str(context.extra.get("captchaId") or self.config.get("captcha_id") or os.getenv("EDUCATION_CHAOXING_CAPTCHA_ID") or "").strip()

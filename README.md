@@ -13,6 +13,65 @@
 
 数据库迁移按顺序执行 `database/migrations/0001_core_schema.sql` 和 `0002_operational_domain.sql`。完整迁移创建 19 张教育领域表，字段统一使用 `utf8mb4_unicode_ci` 并带有业务注释。
 
+## 架构设计
+
+本项目面向学生个人和机构用户，采用“Python 业务控制面 + Go 执行面 + Vue Web”的分层架构。Go 项目继续作为平台执行基石，保留其现有的数据库轮询方案，不强行抽离 `worker/run-task` 的数据库依赖。
+
+```text
+Vue Web
+   |
+Python FastAPI 业务控制面
+   |-- 用户/机构/权限
+   |-- 学生账号和学校目录
+   |-- 单个或批量订单
+   |-- 任务创建、取消、重试
+   |-- 进度、日志和文件展示
+   |
+   +-------------------- MySQL --------------------+
+                                                   |
+                                             Go Worker
+                                      |-- 轮询待执行任务
+                                      |-- 读取学生和学校配置
+                                      |-- 执行登录、课程、作业、考试
+                                      |-- 写入状态、日志和进度
+```
+
+### 组件职责
+
+- `frontend/`：提供个人用户和机构管理端 Web 界面。用户提交学校、账号和密码，查看订单、任务、进度及脱敏日志。
+- `backend/`：唯一的业务控制面，负责认证、租户隔离、学生账号、学校目录、订单、任务和文件元数据。它创建任务并读取 Go 写回的执行结果。
+- Go 执行器：独立负责学校平台登录、课程、视频、作业、考试、人脸相关流程和自动提交。平台协议逻辑尽量复用上游，不在 Python 中重复实现。
+- MySQL：作为 Python 与 Go 之间的共享集成契约。现有 `ea_student`、`ea_order`、`ea_task`、`ea_task_log`、进度表等结构由两端共同使用。
+- Redis：用于任务锁、执行节点状态和短期缓存；本地/单机部署仍可使用现有 Redis 服务。
+- 本地磁盘：保存人脸媒体等文件，数据库只保存文件元数据和路径。
+
+### 任务生命周期
+
+1. Python 根据用户或机构请求创建学生、订单和待执行任务。
+2. Python 启动或确保 Go Worker 进程运行；Worker 轮询 `ea_task` 并领取任务。
+3. Go 从共享数据库读取订单、学校和学生信息，执行真实平台操作。
+4. Go 更新任务状态、心跳、脱敏日志、课程进度和考试进度。
+5. Python 查询并展示结果。登录失败、验证码失败或平台异常必须原样返回失败，禁止伪造成功。
+6. 同一用户不允许同时执行多个任务。取消任务时终止对应 Go 子进程，并将任务恢复为待执行；暂时不做自动重试，由后端提供手动重试。
+
+Python 和 Go 不应同时执行同一类任务。正式接入 Go Worker 后，Python 内置 runner 仅作为迁移兼容或测试入口，避免发生抢任务和状态覆盖。
+
+### Go 上游策略
+
+Go 项目优先通过 fork 维护，定期同步上游更新。本项目只增加必要的配置、数据库兼容和业务扩展，不修改平台适配器核心；能通过现有 Go Worker 和数据库结构实现的需求，不复制或重写上游代码。
+
+### 凭证、文件与发布边界
+
+开发阶段学生密码暂时按现有数据库字段明文保存，并在代码和文档中明确这是阶段性方案。密码、Token、Cookie 和人脸文件不得写入日志或 Git。正式提供多人在线服务前，需要补充可逆加密、凭证轮换、访问审计和数据删除能力。
+
+当前许可证保留禁止商业使用条款。项目可以公开源码并接受社区贡献，但发布时必须同时声明第三方平台限制、账号风险、数据删除方式和真实登录失败处理规则。
+
+### 测试边界
+
+不使用假登录或假任务完成。Python 业务、数据库状态机和 Go 输入输出可在 CI 中测试；学校平台登录、课程、作业和考试使用贡献者提供的真实测试账号在本地执行，账号通过环境变量或本地未跟踪文件注入，不进入仓库。
+
+架构演进顺序为：先稳定现有 Go Worker 与共享数据库的单任务执行，再完善个人/机构批量下单和取消重试，最后将 Go Worker 优化为长期运行并通过内部 HTTP 接收任务。长期运行模式改变进程管理方式，但不改变业务数据库契约。
+
 ## 本地安装与启动
 
 ```powershell
@@ -68,7 +127,9 @@ npm run dev
 
 本地运行和验收不使用 Docker，直接启动 Python 后端和 Vue 前端，并连接现有 MySQL/Redis。
 
-配置只从环境变量读取，`.env.example` 不含真实凭证。学生账号密码、Cookie、Token 和个人信息只能用于本地验证，不得写入日志或 Git。
+Python 应用基础配置继续使用 `backend/.env`；Go Worker 的启动、配置路径、内部地址和令牌使用 `config/runner-integration.yaml`。首次配置可复制 `config/runner-integration.example.yaml`，运行时 YAML 已加入 `.gitignore`，不得提交真实令牌或其他凭证。学生账号密码、Cookie、Token 和个人信息只能用于本地验证，不得写入日志或 Git。
+
+后端启动时会按 YAML 自动启动 Go Worker，并通过其本地内部 HTTP 接口执行登录检测。若只需要运行 Python 测试，可不创建运行时 YAML，Go Worker 集成会保持禁用。
 
 认证接口为 `POST /education/auth/login`、`POST /education/auth/bootstrap`、`GET /education/auth/me`；用户管理接口为 `GET /education/user/list`、`POST /education/user`、`PATCH /education/user/{user_id}` 和 `DELETE /education/user/{user_id}`。认证使用 `EDUCATION_AUTH_SECRET` 签发短期 HMAC Bearer Token，用户密码使用 PBKDF2-SHA256 哈希；未配置签名密钥时登录返回 503。首次初始化仅在 `ea_user` 为空时允许调用 `/education/auth/bootstrap`，并要求独立的 `X-Bootstrap-Token` 与 `EDUCATION_BOOTSTRAP_TOKEN` 匹配。用户状态 `0` 表示启用，角色大于等于 `1` 才能管理用户，角色大于等于 `9` 可跨租户管理。
 

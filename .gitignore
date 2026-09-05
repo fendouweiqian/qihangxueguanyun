@@ -25,6 +25,7 @@ local-baseline/
 *.sqlite3
 .edctl/
 **/.edctl/
+config/runner-integration.yaml
 .idea/
 **/.idea/
 .vscode/

@@ -17,6 +17,7 @@ from app.infrastructure.db import Database, StudentRepository, TaskRepository
 from app.api.auth import _claims
 from app.api.internal_runner import LoginCheckRequest, _check, _response
 from app.application.progress_parser import ProgressDetailParser
+from app.infrastructure.go_runner import GoRunnerError, GoRunnerUnavailable, go_runner_login_check
 
 router = APIRouter(prefix="/education/student", tags=["student"])
 logger = logging.getLogger(__name__)
@@ -50,15 +51,25 @@ def _load_login_context(request: StudentLoginCheckRequest, database: Database) -
     """按学生和订单读取平台登录上下文，不向日志或响应暴露密码。"""
     student_id = str(request.studentId)
     order_id = str(request.orderId) if request.orderId is not None else ""
-    # 登录检测的凭证和学校配置属于学员主记录。订单仅用于成功后的进度快照，
-    # 不能因为历史订单被清理、跨租户或尚未同步而阻断账号登录检测。
-    sql = (
-        "SELECT s.tenant_id,s.student_id,s.school_id,s.account,s.password,s.open_id,"
-        "sc.school_name,sc.school_url,sc.access_type,sc.access_address,sc.school_fid,p.platform_name "
-        "FROM ea_student s LEFT JOIN ea_school sc ON sc.school_id=s.school_id "
-        "LEFT JOIN ea_platform p ON p.platform_id=sc.platform_id WHERE s.student_id=%s"
-    )
-    params = (student_id,)
+    if order_id:
+        sql = (
+            "SELECT o.order_id,o.tenant_id AS order_tenant_id,o.student_id,o.school_id,"
+            "s.account,s.password,s.open_id,sc.school_name,sc.school_url,sc.access_type,"
+            "sc.access_address,sc.school_fid,p.platform_name "
+            "FROM ea_order o JOIN ea_student s ON s.student_id=o.student_id "
+            "LEFT JOIN ea_school sc ON sc.school_id=o.school_id "
+            "LEFT JOIN ea_platform p ON p.platform_id=sc.platform_id "
+            "WHERE o.order_id=%s"
+        )
+        params = (order_id,)
+    else:
+        sql = (
+            "SELECT s.tenant_id AS order_tenant_id,s.student_id,s.school_id,s.account,s.password,s.open_id,"
+            "sc.school_name,sc.school_url,sc.access_type,sc.access_address,sc.school_fid,p.platform_name "
+            "FROM ea_student s LEFT JOIN ea_school sc ON sc.school_id=s.school_id "
+            "LEFT JOIN ea_platform p ON p.platform_id=sc.platform_id WHERE s.student_id=%s"
+        )
+        params = (student_id,)
     try:
         with database.connection() as conn:
             with conn.cursor() as cursor:
@@ -67,13 +78,15 @@ def _load_login_context(request: StudentLoginCheckRequest, database: Database) -
     except Exception as exc:
         raise HTTPException(status_code=503, detail="数据库暂不可用") from exc
     if not row:
-        raise HTTPException(status_code=404, detail="学员不存在")
+        raise HTTPException(status_code=404, detail="订单不存在" if order_id else "学员不存在")
+    if order_id and str(row.get("student_id")) != student_id:
+        raise HTTPException(status_code=400, detail="订单与学员不匹配")
     if not row.get("account") or not row.get("password"):
         raise HTTPException(status_code=400, detail="学员账号或密码为空")
     if not row.get("school_id"):
         raise HTTPException(status_code=400, detail="学员未配置学校")
     return LoginCheckRequest(
-        tenantId=str(row.get("tenant_id") or ""),
+        tenantId=str(row.get("order_tenant_id") or row.get("tenant_id") or ""),
         studentId=student_id,
         schoolId=str(row.get("school_id") or ""),
         account=str(row["account"]),
@@ -87,6 +100,17 @@ def _load_login_context(request: StudentLoginCheckRequest, database: Database) -
         schoolAccessAddress=str(row.get("access_address") or ""),
         refreshSnapshots=bool(order_id),
     )
+
+
+def _go_login_payload(request: LoginCheckRequest) -> dict[str, Any]:
+    """把业务层字符串标识转换为 Go 内部请求所需的 uint64 字段。"""
+    payload = request.model_dump()
+    try:
+        payload["studentId"] = int(request.studentId)
+        payload["schoolId"] = int(request.schoolId)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="学生或学校 ID 格式错误") from exc
+    return payload
 
 
 def repository() -> StudentRepository:
@@ -296,7 +320,7 @@ def delete_student(student_id: str, repo: StudentRepository = Depends(repository
 
 @router.post("/login-check")
 def check_student_login(request: StudentLoginCheckRequest) -> dict:
-    """按订单补齐账号信息，验证平台账号并写回登录与进度快照。"""
+    """按订单读取账号信息，调用 Go 执行器验证登录并写回档案快照。"""
     database = Database(Settings.from_env())
     login_request = _load_login_context(request, database)
     logger.info(
@@ -305,16 +329,31 @@ def check_student_login(request: StudentLoginCheckRequest) -> dict:
         str(request.orderId) if request.orderId is not None else "",
         login_request.schoolId,
     )
-    adapter_name, result = _check(login_request)
-    body = _response(adapter_name, result, include_snapshots=True)
-    result_data = result.data if result is not None and isinstance(result.data, dict) else {}
+    unavailable = False
+    try:
+        body = go_runner_login_check(_go_login_payload(login_request))
+    except GoRunnerUnavailable as exc:
+        unavailable = True
+        body = {"ok": False, "code": "GO_RUNNER_UNAVAILABLE", "adapter": "", "message": str(exc)}
+    except GoRunnerError as exc:
+        unavailable = True
+        body = {"ok": False, "code": "GO_RUNNER_ERROR", "adapter": "", "message": str(exc)}
+    if not isinstance(body, dict):
+        body = {"ok": False, "code": "GO_RUNNER_INVALID_RESPONSE", "adapter": "", "message": "Go Worker 返回格式错误"}
+        unavailable = True
+    body = {key: value for key, value in body.items() if key.lower() not in {"password", "token", "cookie", "secret"}}
+    body.setdefault("ok", False)
+    body.setdefault("code", "LOGIN_FAILED")
+    body.setdefault("adapter", "")
+    body.setdefault("message", "登录检测失败")
+    result_data = body
     student_repo = StudentRepository(database)
     message = body.get("message", "登录检测失败")
     logger.info(
         "student login-check result: student_id=%s order_id=%s adapter=%s ok=%s code=%s",
         login_request.studentId,
         str(request.orderId) if request.orderId is not None else "",
-        adapter_name or "",
+        str(body.get("adapter") or ""),
         body["ok"],
         body.get("code", ""),
     )
@@ -365,7 +404,7 @@ def check_student_login(request: StudentLoginCheckRequest) -> dict:
                         "items": parser.parse_exam_items(exam_snapshot),
                     })
     if not body["ok"]:
-        raise HTTPException(status_code=400, detail=body)
+        raise HTTPException(status_code=503 if unavailable else 400, detail=body)
     return {"code": 200, "msg": "校验成功", "data": body}
 
 

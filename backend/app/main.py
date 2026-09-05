@@ -1,6 +1,7 @@
 """FastAPI 应用入口。"""
 
 from pathlib import Path
+from contextlib import asynccontextmanager
 import logging
 import sys
 
@@ -17,8 +18,24 @@ from app.api.operations import router as operations_router
 from app.config import Settings
 from app.infrastructure.db import Database
 from app.infrastructure.redis_client import RedisStore
+from app.infrastructure.go_runner import GoRunnerError, start_go_runner, stop_go_runner
 
-app = FastAPI(title="教育业务系统", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """启动和停止由业务后端托管的 Go Worker。"""
+    try:
+        start_go_runner()
+    except GoRunnerError:
+        _app_logger.exception("Go Worker 启动失败")
+        raise
+    try:
+        yield
+    finally:
+        stop_go_runner()
+
+
+app = FastAPI(title="教育业务系统", version="0.1.0", lifespan=lifespan)
 # Uvicorn 默认将应用日志级别设为 WARNING；业务请求需要保留阶段和状态码。
 # 适配器日志只写安全元数据，具体账号、密码、Cookie 和 Token 不进入日志。
 _app_logger = logging.getLogger("app")

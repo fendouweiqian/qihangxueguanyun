@@ -1,5 +1,5 @@
 from app.adapters.base import AdapterContext, AdapterTask, TaskKind
-from app.adapters.chaoxing import ChaoxingAdapter, ChaoxingClient
+from app.adapters.chaoxing import ChaoxingAdapter, ChaoxingClient, account_kind
 from app.adapters.chaoxing_learning import (
     Chapter,
     ChaoxingLearningClient,
@@ -185,6 +185,14 @@ def test_chaoxing_login_encrypts_form_and_accepts_redirect_without_network():
     )
     result = adapter.login(AdapterContext("T", "1", "2", "example-account", "example-password", {"verifyCode": "0000"}))
     assert result.ok is True
+
+
+def test_chaoxing_account_kind_matches_go_phone_login_rule():
+    """手机号账号应进入与 Go 执行器一致的手机号登录诊断分支。"""
+    assert account_kind("13800000000") == "phone"
+    assert account_kind(" 13800000000 ") == "phone"
+    assert account_kind("000000000000000000") == "username"
+    assert account_kind("student-account") == "username"
 
 
 def test_chaoxing_captcha_protocol_uses_explicit_coordinate_without_solver():

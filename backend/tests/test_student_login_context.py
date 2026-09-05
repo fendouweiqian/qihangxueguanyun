@@ -55,7 +55,7 @@ class _Database:
         return self.connection_instance
 
 
-def test_login_context_uses_student_record_when_order_id_is_present():
+def test_login_context_uses_order_record_when_order_id_is_present():
     database = _Database()
 
     context = _load_login_context(
@@ -66,5 +66,5 @@ def test_login_context_uses_student_record_when_order_id_is_present():
     assert context.studentId == "9001"
     assert context.schoolId == "38"
     assert context.refreshSnapshots is True
-    assert database.connection_instance.cursor_instance.params == ("9001",)
-    assert "FROM ea_student" in database.connection_instance.cursor_instance.sql
+    assert database.connection_instance.cursor_instance.params == ("missing-order",)
+    assert "FROM ea_order" in database.connection_instance.cursor_instance.sql

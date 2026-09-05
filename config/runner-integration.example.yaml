@@ -1,0 +1,11 @@
+# Go Worker 集成配置示例。复制为 runner-integration.yaml 后按部署环境修改。
+goRunner:
+  enabled: false
+  # 可执行文件和 Go 配置相对于本文件所在目录解析。
+  binary: "../runner/education-worker"
+  config: "./runner.yaml"
+  internalUrl: "http://127.0.0.1:8089"
+  # 留空时从 config 指向的 Go YAML 的 internalHttp.token 读取。
+  internalToken: ""
+  startTimeoutSeconds: 15
+  requestTimeoutSeconds: 120

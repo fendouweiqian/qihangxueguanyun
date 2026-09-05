@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
@@ -119,6 +120,156 @@ def test_internal_login_check_rejects_wrong_configured_token(monkeypatch):
         headers={"X-Runner-Token": "wrong-token"},
     )
     assert response.status_code == 401
+
+
+def test_student_login_check_uses_go_and_persists_personal_info(monkeypatch):
+    import app.api.students as students_module
+    from app.api.internal_runner import LoginCheckRequest
+
+    calls = []
+
+    class FakeDatabase:
+        pass
+
+    class FakeStudentRepository:
+        def __init__(self, database):
+            self.database = database
+
+        def update_login_status(self, student_id, status, message):
+            calls.append(("login-status", student_id, status, message))
+            return True
+
+    class FakeTaskRepository:
+        def __init__(self, database):
+            self.database = database
+
+        def update_student_profile(self, payload):
+            calls.append(("profile", payload))
+            return True
+
+        def upsert_course_progress(self, payload):
+            calls.append(("course", payload))
+
+        def upsert_exam_progress(self, payload):
+            calls.append(("exam", payload))
+
+        def replace_course_progress_items(self, payload):
+            calls.append(("course-items", payload))
+            return 0
+
+        def replace_exam_progress_items(self, payload):
+            calls.append(("exam-items", payload))
+            return 0
+
+    login_request = LoginCheckRequest(
+        tenantId="T",
+        studentId="1",
+        schoolId="38",
+        account="real-account",
+        password="real-password",
+        platformName="学习通",
+    )
+    go_response = {
+        "ok": True,
+        "code": "OK",
+        "adapter": "XUEXITONG",
+        "message": "登录检测通过",
+        "studentName": "真实学生",
+        "profileSnapshot": '{"studentName":"真实学生"}',
+    }
+
+    monkeypatch.setattr(students_module, "Database", lambda settings: FakeDatabase())
+    monkeypatch.setattr(students_module, "_load_login_context", lambda request, database: login_request)
+    monkeypatch.setattr(students_module, "StudentRepository", FakeStudentRepository)
+    monkeypatch.setattr(students_module, "TaskRepository", FakeTaskRepository)
+    go_calls = []
+    monkeypatch.setattr(students_module, "go_runner_login_check", lambda request: (go_calls.append(request) or go_response))
+    monkeypatch.setattr(students_module, "_check", lambda request: (_ for _ in ()).throw(AssertionError("Python adapter must not be used")))
+
+    response = TestClient(app).post(
+        "/education/student/login-check",
+        json={"studentId": "1", "orderId": "9000000000000000003"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["studentName"] == "真实学生"
+    assert go_calls[0]["studentId"] == 1
+    assert go_calls[0]["schoolId"] == 38
+    assert calls[0][0:3] == ("login-status", "1", 1)
+    assert calls[1][0] == "profile"
+
+
+def test_student_login_check_rejects_order_student_mismatch(monkeypatch):
+    import app.api.students as students_module
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(
+        students_module,
+        "_load_login_context",
+        lambda request, database: (_ for _ in ()).throw(HTTPException(status_code=400, detail="订单与学员不匹配")),
+    )
+    response = TestClient(app).post(
+        "/education/student/login-check",
+        json={"studentId": "1", "orderId": "9000000000000000003"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "订单与学员不匹配"
+
+
+def test_load_login_context_uses_order_school_and_rejects_mismatch():
+    import app.api.students as students_module
+    from fastapi import HTTPException
+    from app.api.students import StudentLoginCheckRequest
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def execute(self, sql, params):
+            self.params = params
+
+        def fetchone(self):
+            return {
+                "order_tenant_id": "T",
+                "student_id": 2,
+                "school_id": 88,
+                "account": "account",
+                "password": "password",
+                "open_id": None,
+                "school_name": "订单学校",
+                "school_url": "https://school.example",
+                "access_type": 1,
+                "access_address": "https://school.example/login",
+                "school_fid": "fid",
+                "platform_name": "学习通",
+            }
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    class FakeDatabase:
+        def connection(self):
+            class Context:
+                def __enter__(self_inner):
+                    return Connection()
+
+                def __exit__(self_inner, *_):
+                    return False
+
+            return Context()
+
+    with pytest.raises(HTTPException) as exc_info:
+        students_module._load_login_context(
+            StudentLoginCheckRequest(studentId="1", orderId="9000000000000000003"),
+            FakeDatabase(),
+        )
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "订单与学员不匹配"
 
 
 def test_auth_login_and_me_do_not_expose_password_hash(monkeypatch):
