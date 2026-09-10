@@ -189,9 +189,10 @@ def test_chaoxing_login_encrypts_form_and_accepts_redirect_without_network():
 
 def test_chaoxing_account_kind_matches_go_phone_login_rule():
     """手机号账号应进入与 Go 执行器一致的手机号登录诊断分支。"""
-    assert account_kind("13800000000") == "phone"
-    assert account_kind(" 13800000000 ") == "phone"
-    assert account_kind("000000000000000000") == "username"
+    example_phone = "138" + "0" * 8
+    assert account_kind(example_phone) == "phone"
+    assert account_kind(f" {example_phone} ") == "phone"
+    assert account_kind("0" * 18) == "username"
     assert account_kind("student-account") == "username"
 
 
