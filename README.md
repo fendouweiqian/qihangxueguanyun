@@ -49,14 +49,16 @@ Go Worker 作为独立执行组件接入，本仓库暂不包含它的源码和�
 
 需要准备 Python 3.11 或 3.12、Node.js 20、MySQL 8 和 Redis 7。执行真实课程任务还需要 Go Worker。
 
-先创建数据库 `education_assistant`，再按顺序执行：
+在仓库根目录创建数据库 `education_assistant`，再按顺序执行迁移：
 
-```text
-database/migrations/0001_core_schema.sql
-database/migrations/0002_operational_domain.sql
+```bash
+mysql -u root -p -e "CREATE DATABASE education_assistant CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -u root -p education_assistant -e "source database/migrations/0001_core_schema.sql;"
+mysql -u root -p education_assistant -e "source database/migrations/0002_operational_domain.sql;"
+mysql -u root -p education_assistant -e "source database/migrations/0003_seed_base_data.sql;"
 ```
 
-不要使用包含真实学生、订单或任务数据的数据库备份初始化公开环境。
+第三个脚本写入默认租户、平台和学校目录。它不包含管理员、学生、订单、任务或任何登录凭证。不要使用包含真实学生、订单或任务数据的数据库备份初始化公开环境。
 
 ### Windows
 
@@ -122,7 +124,24 @@ npm run dev
 
 ## 首次登录
 
-新数据库没有管理员账号。先在 `backend/.env` 中设置 `EDUCATION_AUTH_SECRET` 和 `EDUCATION_BOOTSTRAP_TOKEN`，启动后端，再打开 `http://127.0.0.1:8281/docs`，调用 `POST /education/auth/bootstrap` 创建首个管理员。该接口只允许在用户表为空时调用一次。
+基础数据脚本会创建登录页所需的默认租户，但不会在公开仓库中放置通用管理员密码。首次登录信息约定如下：
+
+| 项目           | 内容                                         |
+| -------------- | -------------------------------------------- |
+| 租户           | `000000`                                     |
+| 超级管理员账号 | `admin`                                      |
+| 超级管理员密码 | 由部署者在首次初始化时设置，仓库没有默认密码 |
+
+先在 `backend/.env` 中为 `EDUCATION_AUTH_SECRET` 和 `EDUCATION_BOOTSTRAP_TOKEN` 分别填写随机值，再启动后端。随后调用一次初始化接口，把示例中的令牌和密码替换为自己的值：
+
+```bash
+curl -X POST http://127.0.0.1:8281/education/auth/bootstrap \
+  -H "Content-Type: application/json" \
+  -H "X-Bootstrap-Token: 替换为EDUCATION_BOOTSTRAP_TOKEN" \
+  -d '{"tenantId":"000000","username":"admin","password":"替换为至少8位强密码","nickName":"超级管理员"}'
+```
+
+该接口只允许在 `ea_user` 为空时成功一次。创建完成后，在 Web 登录页填写租户 `000000`、账号 `admin` 和刚才设置的密码。随后应从 `backend/.env` 中删除 `EDUCATION_BOOTSTRAP_TOKEN` 并重启后端，避免初始化令牌继续有效。
 
 ## 参与贡献
 
