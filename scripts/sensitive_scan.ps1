@@ -1,9 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
-$forbiddenName = [string]::Concat('y','a','t','o','r','i')
 $scanTargets = @('backend', 'frontend/src', 'config', 'database', 'docs', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md')
 $patterns = @(
-    $forbiddenName,
     '-----BEGIN .*PRIVATE KEY-----',
     'AKIA[0-9A-Z]{16}',
     'password\s*[:=]\s*root',

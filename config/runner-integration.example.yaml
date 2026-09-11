@@ -2,8 +2,8 @@
 goRunner:
   enabled: false
   # 可执行文件和 Go 配置相对于本文件所在目录解析。
-  binary: "../runner/education-worker"
-  config: "./runner.yaml"
+  binary: "../runner/yatori-go-console"
+  config: "../runner/runner.yaml"
   internalUrl: "http://127.0.0.1:8089"
   # 留空时从 config 指向的 Go YAML 的 internalHttp.token 读取。
   internalToken: ""

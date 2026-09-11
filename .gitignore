@@ -26,6 +26,7 @@ local-baseline/
 .edctl/
 **/.edctl/
 config/runner-integration.yaml
+runner/
 .idea/
 **/.idea/
 .vscode/

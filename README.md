@@ -32,7 +32,7 @@ FastAPI 业务后端 ---- MySQL / Redis
 
 Python 后端统一管理用户、机构、学员、学校和订单。Go Worker 从同一个数据库读取任务，执行平台登录、课程和考试流程，再写回进度与日志。两端共用数据库，但职责分开，学校协议不在 Python 中重复实现。
 
-Go Worker 作为独立执行组件接入，本仓库暂不包含它的源码和构建产物。运行真实任务前，需要从对应 Go 项目构建兼容的 Worker，并准备它使用的 YAML 配置。
+Go Worker 作为独立执行组件接入，本仓库不重复保存它的源码和构建产物。兼容版本基于 [yatori-go-console](https://github.com/yatori-dev/yatori-go-console) 扩展，维护在 [fendouweiqian/yatori-go-console](https://github.com/fendouweiqian/yatori-go-console)。
 
 ## 项目目录
 
@@ -111,6 +111,17 @@ npm run dev
 浏览器访问 `http://127.0.0.1:5180`。
 
 ## 配置 Go Worker
+
+在项目根目录获取 Worker 源码并安装 Go 依赖：
+
+```bash
+git clone https://github.com/fendouweiqian/yatori-go-console.git runner/source
+go -C runner/source mod download
+go -C runner/source build -o ../yatori-go-console ./main.go
+cp runner/source/config/runner.example.yaml runner/runner.yaml
+```
+
+Windows 构建时将输出文件改为 `../yatori-go-console.exe`，并同步修改下面的 `binary`。`runner/runner.yaml` 中的数据库必须与 Python 后端使用同一个库，`adminApi.baseUrl` 指向 Python 后端地址。
 
 复制 `config/runner-integration.example.yaml` 后，主要填写以下字段：
 
